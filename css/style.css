@@ -1,0 +1,14 @@
+body {
+  margin: 0;
+  background: #eee;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+canvas {
+  background: white;
+  border: 1px solid #ccc;
+  touch-action: none; /* important for mobile touch support */
+}
