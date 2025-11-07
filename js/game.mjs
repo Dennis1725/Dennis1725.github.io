@@ -184,28 +184,31 @@ export class Game {
         const playfieldTop = this.playfield.y;
         const playfieldBottom = this.playfield.y + this.playfield.height;
         const playfieldLeft = this.playfield.x;
+        const playfieldRight = this.playfield.x + this.playfield.width;
         
-        // Position towards the boost button side (left side of screen)
-        const xPosition = playfieldLeft + this.canvas.width * 0.15;
+        // Player 1 (blue, top): boost button on left side
+        const xPositionPlayer1 = playfieldLeft + this.canvas.width * 0.15;
+        // Player 2 (green, bottom): boost button on right side
+        const xPositionPlayer2 = playfieldRight - this.canvas.width * 0.15;
         
         ctx.save();
         ctx.font = "bold 20px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         
-        // Player 1 label (top, blue) - closer to playfield, shifted towards boost button
+        // Player 1 label (top, blue) - over boost button (left side)
         const player1Y = playfieldTop - 15;
         ctx.fillStyle = this.players[0].color;
-        ctx.translate(xPosition, player1Y);
+        ctx.translate(xPositionPlayer1, player1Y);
         ctx.rotate(Math.PI);
         ctx.fillText(`${this.players[0].color.toUpperCase()} PLAYER`, 0, 0);
         ctx.rotate(-Math.PI);
-        ctx.translate(-xPosition, -player1Y);
+        ctx.translate(-xPositionPlayer1, -player1Y);
         
-        // Player 2 label (bottom, green) - closer to playfield, shifted towards boost button
+        // Player 2 label (bottom, green) - over boost button (right side)
         const player2Y = playfieldBottom + 15;
         ctx.fillStyle = this.players[1].color;
-        ctx.fillText(`${this.players[1].color.toUpperCase()} PLAYER`, xPosition, player2Y);
+        ctx.fillText(`${this.players[1].color.toUpperCase()} PLAYER`, xPositionPlayer2, player2Y);
         
         ctx.restore();
     }
@@ -214,21 +217,24 @@ export class Game {
         const playfieldTop = this.playfield.y;
         const playfieldBottom = this.playfield.y + this.playfield.height;
         const playfieldLeft = this.playfield.x;
+        const playfieldRight = this.playfield.x + this.playfield.width;
         
-        // Position towards the boost button side (left side of screen)
-        const xPosition = playfieldLeft + this.canvas.width * 0.15;
+        // Player 1 (blue, top): boost button on left side
+        const xPositionPlayer1 = playfieldLeft + this.canvas.width * 0.15;
+        // Player 2 (green, bottom): boost button on right side
+        const xPositionPlayer2 = playfieldRight - this.canvas.width * 0.15;
         
         this.drawRecoilText(
             this.lastRecoil[0], 
             playfieldTop - 35,
-            xPosition,
+            xPositionPlayer1,
             true
         );
         
         this.drawRecoilText(
             this.lastRecoil[1], 
             playfieldBottom + 35,
-            xPosition,
+            xPositionPlayer2,
             false
         );
     }
