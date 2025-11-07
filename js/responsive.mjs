@@ -6,6 +6,15 @@ const Responsive = {
         };
     },
 
+    isDesktop() {
+        const { width } = this.getScreenDimensions();
+        return width >= 1440;
+    },
+
+    getKnockbackModifier() {
+        return this.isDesktop() ? 0.8 : 1.0; // 20% reduction on desktop
+    },
+
     calculatePlayerSpeed() {
         const { width, height } = this.getScreenDimensions();
         const baseSpeed = 3;

@@ -1,3 +1,6 @@
+/**
+ * game module - manages the game 
+ */
 import { Player } from "./player.mjs";
 import { Joystick } from "./joystick.mjs";
 import Button from "./button.mjs";
@@ -8,171 +11,222 @@ import { HorizontalLayout, VerticalLayout } from "./layout.mjs";
 import { Screen } from "./screen.mjs";
 import Responsive from "./responsive.mjs";
 
+const RECOIL_DISPLAY_OFFSET = {
+    top: 15,
+    bottom: 25
+};
+
+const LAYOUT_WEIGHTS = {
+    menuTop: 3,
+    playfield: 8,
+    menuBottom: 4,
+    playfieldContent: 4,
+    button: 1.2,
+    joystick: 2
+};
+
 export class Game {
     constructor(ctx, canvas) {
         this.ctx = ctx;
         this.canvas = canvas;
 
-        // Core systems
         this.physics = new Physics();
         this.knockback = new KnockbackSystem();
+        this.lastRecoil = [0, 0];
 
-    // recoil display (last recoil magnitude per player)
-    this.lastRecoil = [0, 0];
-
-        // Game entities
         this.players = [];
         this.joysticks = [];
-    this.buttons = [];
+        this.buttons = [];
         this.playfield = new Playfield(ctx, this.physics, this);
 
-        // Layouts
-        this.mainLayout = VerticalLayout(ctx);
-        this.menuLayoutPlayerOne = HorizontalLayout(ctx);
-        this.menuLayoutPlayerTwo = HorizontalLayout(ctx);
-        this.playfieldLayout = VerticalLayout(ctx);
+        this.createLayouts();
 
-        // UI + State
         this.state = "title";
         this.winner = null;
-    this.over = false;
+        this.over = false;
         this.screen = new Screen(this);
 
-        // Initialize everything
-        this.initializeLayouts();
+        this.initialize();
+    }
+
+    createLayouts() {
+        this.mainLayout = VerticalLayout(this.ctx);
+        this.menuLayoutPlayerOne = HorizontalLayout(this.ctx);
+        this.menuLayoutPlayerTwo = HorizontalLayout(this.ctx);
+        this.playfieldLayout = VerticalLayout(this.ctx);
+    }
+
+    initialize() {
         this.initializePlayers();
+        this.initializeLayouts();
         this.initializePhysics();
     }
 
     initializePlayers() {
-        // Create and setup players with their joysticks
-        const joystick1 = new Joystick();
         const playerSpeed = Responsive.calculatePlayerSpeed();
-        const player1 = new Player({ color: "blue", speed: playerSpeed });
-        player1.connectJoystick(joystick1);
+        
+        const player1 = this.createPlayer("blue", playerSpeed);
+        const player2 = this.createPlayer("green", playerSpeed);
 
-    const button1 = new Button({ label: "Boost", flipped: true });
-        button1.connectPlayer(player1);
+        this.setupPlayerControls();
+    }
 
-        const joystick2 = new Joystick();
-        const player2 = new Player({ color: "green", speed: playerSpeed });
-        player2.connectJoystick(joystick2);
+    createPlayer(color, speed) {
+        const joystick = new Joystick();
+        const player = new Player({ color, speed });
+        player.connectJoystick(joystick);
 
-        const button2 = new Button({ label: "Boost" });
-        button2.connectPlayer(player2);
+        const button = new Button({ 
+            label: "Boost", 
+            flipped: color === "blue" 
+        });
+        button.connectPlayer(player);
 
-        this.players.push(player1, player2);
-        this.joysticks.push(joystick1, joystick2);
-        this.buttons.push(button1, button2);
+        this.players.push(player);
+        this.joysticks.push(joystick);
+        this.buttons.push(button);
 
-    // Add buttons and joysticks to their respective layouts
-    // Player 1 (upper): [ button | joystick ] - swapped order
-    this.menuLayoutPlayerOne.addChild(button1, 1.2);
-    this.menuLayoutPlayerOne.addChild(joystick1, 2);
+        return player;
+    }
 
-    // Player 2 (lower): [ joystick | button ] - normal order
-        this.menuLayoutPlayerTwo.addChild(joystick2, 2); // reduced from 3
-        this.menuLayoutPlayerTwo.addChild(button2, 1.2); // increased from 1
+    setupPlayerControls() {
+        this.menuLayoutPlayerOne.addChild(this.buttons[0], LAYOUT_WEIGHTS.button);
+        this.menuLayoutPlayerOne.addChild(this.joysticks[0], LAYOUT_WEIGHTS.joystick);
+
+        this.menuLayoutPlayerTwo.addChild(this.joysticks[1], LAYOUT_WEIGHTS.joystick);
+        this.menuLayoutPlayerTwo.addChild(this.buttons[1], LAYOUT_WEIGHTS.button);
     }
 
     initializeLayouts() {
-        // Setup the layout hierarchy
-        this.playfieldLayout.addChild(this.playfield, 4);
-        // Add more space for controls and add buffer
-        this.mainLayout.addChild(this.menuLayoutPlayerOne, 3);
-        this.mainLayout.addChild(this.playfieldLayout, 8);
-        this.mainLayout.addChild(this.menuLayoutPlayerTwo, 4); // increased for buffer
+        this.playfieldLayout.addChild(this.playfield, LAYOUT_WEIGHTS.playfieldContent);
+        
+        this.mainLayout.addChild(this.menuLayoutPlayerOne, LAYOUT_WEIGHTS.menuTop);
+        this.mainLayout.addChild(this.playfieldLayout, LAYOUT_WEIGHTS.playfield);
+        this.mainLayout.addChild(this.menuLayoutPlayerTwo, LAYOUT_WEIGHTS.menuBottom);
     }
 
     initializePhysics() {
-        // Add all players to physics system
-        for (const player of this.players) {
-            this.physics.add(player);
-        }
+        this.players.forEach(player => this.physics.add(player));
         this.physics.onCollide = (a, b) => this.knockback.apply(a, b);
+        this.knockback.onRecoil = this.handleRecoil.bind(this);
+    }
 
-        // receive recoil reports from knockback system
-        this.knockback.onRecoil = ({ aPush, bPush, a, b }) => {
-            // Accumulate pushes into lastRecoil so values only increase until restart
-            const players = this.players;
-            if (a && a.type === "player") {
-                const idx = players.indexOf(a);
-                if (idx >= 0) this.lastRecoil[idx] += Number(aPush.toFixed(2));
-            }
-            if (b && b.type === "player") {
-                const idx = players.indexOf(b);
-                if (idx >= 0) this.lastRecoil[idx] += Number(bPush.toFixed(2));
-            }
-        };
+    handleRecoil({ aPush, bPush, a, b }) {
+        this.updateRecoilForObject(a, aPush);
+        this.updateRecoilForObject(b, bPush);
+    }
+
+    updateRecoilForObject(obj, push) {
+        if (obj?.type !== "player") return;
+        
+        const index = this.players.indexOf(obj);
+        if (index >= 0) {
+            this.lastRecoil[index] += Number(push.toFixed(2));
+        }
     }
 
     resize(width, height) {
         this.canvas.width = width;
         this.canvas.height = height;
 
-        if (this.mainLayout.set)
+        if (this.mainLayout.set) {
             this.mainLayout.set(0, 0, width, height, this.ctx);
+        }
     }
 
     update() {
         if (this.state !== "playing") return;
 
-        // Update player positions based on input
-        for (const player of this.players) {
-            player.update();
-        }
+        // Sync accumulated recoil to players before physics calculations
+        this.syncRecoilToPlayers();
 
-    // Update physics system (pass game so physics can notify game-level events)
-    this.physics.update(this);
+        this.players.forEach(player => player.update());
+        this.physics.update(this);
         this.knockback.update(this.physics.objects);
-
-        // Update playfield state and check win conditions
         this.playfield.update(this.players);
     }
 
-    // Called by Physics when a player collides with an obstacle
+    syncRecoilToPlayers() {
+        this.players.forEach((player, index) => {
+            player.accumulatedRecoil = this.lastRecoil[index];
+        });
+    }
+
     playerHitObstacle(player, obstacle, otherPlayer) {
         if (this.over) return;
+        
         this.over = true;
         this.state = "gameover";
         this.winner = otherPlayer || null;
-        console.log(`💥 Player ${player.color?.toUpperCase() || ''} hit an obstacle. ${this.winner ? this.winner.color.toUpperCase() + ' wins.' : 'Game over.'}`);
     }
-    
+
     draw() {
-        const ctx = this.ctx;
-        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
         if (this.state === "playing") {
-            // Draw layout first
-            this.mainLayout.draw();
-            
-            // Draw playfield independently
-            this.playfield.draw();
-            
-            // Draw players independently
-            for (const player of this.players) {
-                player.draw(ctx);
-            }
-            // Draw recoils between controls and playfield
-            this._drawRecoilInControls(ctx);
+            this.drawGameplay();
         }
 
         this.screen.draw();
     }
 
-    _drawRecoilInControls(ctx) {
-        // Get playfield bounds
-        const playfieldBottom = this.playfield.y + this.playfield.height;
+    drawGameplay() {
+        this.mainLayout.draw();
+        this.playfield.draw();
+        
+        this.players.forEach(player => player.draw(this.ctx));
+        this.drawRecoilDisplay();
+        this.drawPlayerLabels();
+    }
+
+    drawPlayerLabels() {
+        const ctx = this.ctx;
         const playfieldTop = this.playfield.y;
+        const playfieldBottom = this.playfield.y + this.playfield.height;
         
-        // Player 1 recoil (between upper controls and playfield top)
-        const recoil1Percent = (this.lastRecoil[0]).toFixed(2);
-        const p1Y = playfieldTop - 15; // 15px above playfield
+        ctx.save();
+        ctx.font = "bold 20px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
         
-        // Player 2 recoil (between playfield bottom and lower controls)
-        const recoil2Percent = (this.lastRecoil[1]).toFixed(2);
-        const p2Y = playfieldBottom + 25; // 25px below playfield
+        // Player 1 label (top, blue) - now closer to playfield
+        const player1Y = playfieldTop - RECOIL_DISPLAY_OFFSET.top;
+        ctx.fillStyle = this.players[0].color;
+        ctx.translate(this.canvas.width / 2, player1Y);
+        ctx.rotate(Math.PI);
+        ctx.fillText(`${this.players[0].color.toUpperCase()} PLAYER`, 0, 0);
+        ctx.rotate(-Math.PI);
+        ctx.translate(-this.canvas.width / 2, -player1Y);
+        
+        // Player 2 label (bottom, green) - now closer to playfield
+        const player2Y = playfieldBottom + RECOIL_DISPLAY_OFFSET.bottom;
+        ctx.fillStyle = this.players[1].color;
+        ctx.fillText(`${this.players[1].color.toUpperCase()} PLAYER`, this.canvas.width / 2, player2Y);
+        
+        ctx.restore();
+    }
+
+    drawRecoilDisplay() {
+        const playfieldTop = this.playfield.y;
+        const playfieldBottom = this.playfield.y + this.playfield.height;
+        
+        this.drawRecoilText(
+            this.lastRecoil[0], 
+            playfieldTop - RECOIL_DISPLAY_OFFSET.top - 25, 
+            true
+        );
+        
+        this.drawRecoilText(
+            this.lastRecoil[1], 
+            playfieldBottom + RECOIL_DISPLAY_OFFSET.bottom + 25, 
+            false
+        );
+    }
+
+    drawRecoilText(recoil, y, flipped) {
+        const ctx = this.ctx;
+        const centerX = this.canvas.width / 2;
+        const text = `recoil: ${recoil.toFixed(2)}%`;
 
         ctx.save();
         ctx.fillStyle = "black";
@@ -180,37 +234,16 @@ export class Game {
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
-        const centerX = this.canvas.width / 2;
-
-        // Draw P1 recoil upside down for the top player
-        ctx.save();
-        ctx.translate(centerX, p1Y);
-        ctx.rotate(Math.PI);
-        ctx.fillText(`${recoil1Percent}%`, 0, 0);
-        ctx.restore();
-
-        // Draw P2 recoil normally for the bottom player
-        ctx.fillText(`${recoil2Percent}%`, centerX, p2Y);
-
-        ctx.restore();
-    }
-
-    /*draw() {
-    const ctx = this.ctx;
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
-    if (this.state === "playing") {
-        this.mainLayout.draw();
-        this.playfield.draw(); // ✅ Explizit zeichnen!
-        
-        // Player zeichnen
-        for (const player of this.players) {
-            player.draw();
+        if (flipped) {
+            ctx.translate(centerX, y);
+            ctx.rotate(Math.PI);
+            ctx.fillText(text, 0, 0);
+        } else {
+            ctx.fillText(text, centerX, y);
         }
-    }
 
-    this.screen.draw();
-}*/
+        ctx.restore();
+    }
 
     loop() {
         this.update();
@@ -224,33 +257,43 @@ export class Game {
     }
 
     restart() {
-        this.players.forEach((p, i) => {
-            p.x = (this.canvas.width / 3) * (i + 1);
-            p.y = this.canvas.height / 2;
-            p.vx = 0;
-            p.vy = 0;
-            p.collisions = 0;
-            // restore normal speed
-            if (p.baseSpeed != null) p.speed = p.baseSpeed;
+        this.resetPlayers();
+        this.resetObstacles();
+        this.resetButtons();
+        this.resetGameState();
+    }
+
+    resetPlayers() {
+        this.players.forEach((player, index) => {
+            player.x = (this.canvas.width / 3) * (index + 1);
+            player.y = this.canvas.height / 2;
+            player.vx = 0;
+            player.vy = 0;
+            player.collisions = 0;
+            
+            if (player.baseSpeed != null) {
+                player.speed = player.baseSpeed;
+            }
         });
+    }
 
-        // Remove old obstacles from physics so we don't accumulate duplicates
+    resetObstacles() {
         this.physics.objects = this.physics.objects.filter(o => o.type === 'player');
-
         this.playfield.initialized = false;
         this.playfield.generateObstacles();
+    }
 
-        // reset buttons state
-        for (const b of this.buttons) {
-            b.availableAt = 0;
-            b.active = false;
-            b._originalSpeed = null;
-            b.lastTap = 0;
-        }
+    resetButtons() {
+        this.buttons.forEach(button => {
+            button.availableAt = 0;
+            button.active = false;
+            button._originalSpeed = null;
+            button.lastTap = 0;
+        });
+    }
 
-        // reset recoil tracking
+    resetGameState() {
         this.lastRecoil = [0, 0];
-
         this.over = false;
         this.state = "playing";
         this.winner = null;

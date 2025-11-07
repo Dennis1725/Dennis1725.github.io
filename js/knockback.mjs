@@ -1,141 +1,184 @@
-// js/knockback.mjs
+/**
+ * Knockback system - handles collision physics and recoil
+ */
+import Responsive from "./responsive.mjs";
+
+const DEFAULT_CONFIG = {
+    baseStrength: 30,
+    friction: 0.95,
+    growth: 0.1,
+    decay: 0.50,
+    speedInfluence: 5,
+    frontThreshold: 0.5,
+    frontReduction: 0.5,
+    fasterBias: 0.5,
+    slowerBias: 0.8,
+    recoilScale: 0.165,
+    separationScale: 0.165,
+    impulseScale: 0.165,
+    debugScale: 10,
+    shieldCollisionMultiplier: 1.5
+};
+
 export class KnockbackSystem {
-    constructor({
-        // tuned for milder recoil
-        baseStrength = 30,
-        friction = 0.95,
-        growth = 0.1,
-        decay = 0.50,
-        speedInfluence = 5 // how much speed difference affects knockback
-    } = {}) {
-        this.baseStrength = baseStrength;
-        this.friction = friction;
-        this.growth = growth;
-        this.decay = decay;
-        this.speedInfluence = speedInfluence;
-        // optional callback to report recoil values: function({aPush, bPush, a, b})
+    constructor(config = {}) {
+        Object.assign(this, { ...DEFAULT_CONFIG, ...config });
         this.onRecoil = null;
     }
 
     apply(a, b) {
+        const collision = this.calculateCollision(a, b);
+        if (!collision) return;
+
+        const { dx, dy, dist, overlap, nx, ny } = collision;
+        const speeds = this.calculateSpeeds(a, b);
+        const knockback = this.calculateKnockback(a, b, speeds, overlap, nx, ny);
+        
+        this.applyKnockback(a, b, nx, ny, knockback);
+        this.notifyRecoil(a, b, knockback);
+    }
+
+    calculateCollision(a, b) {
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const dist = Math.hypot(dx, dy);
-        if (dist === 0) return;
+        
+        if (dist === 0) return null;
 
         const overlap = (a.radius + b.radius) - dist;
-        if (overlap <= 0) return;
+        if (overlap <= 0) return null;
 
-        const nx = dx / dist;
-        const ny = dy / dist;
+        return {
+            dx, dy, dist, overlap,
+            nx: dx / dist,
+            ny: dy / dist
+        };
+    }
 
-        // Compute each object's current speed
+    calculateSpeeds(a, b) {
         const speedA = Math.hypot(a.vx || 0, a.vy || 0);
         const speedB = Math.hypot(b.vx || 0, b.vy || 0);
-
-        // Base knockback grows with number of collisions
-        const knockA = this.baseStrength * (1 + (a.collisions || 0) * this.growth);
-        const knockB = this.baseStrength * (1 + (b.collisions || 0) * this.growth);
-
-        // Add scaling based on relative speed difference
         const speedDiff = Math.abs(speedA - speedB);
-        const knockScale = 1 + speedDiff * this.speedInfluence;
-
-        // Determine who is faster — they knock back the slower one more
         const aIsFaster = speedA > speedB;
 
-            // Only move objects that are not obstacles
-            // Increase push magnitude and bias so faster object pushes the slower one more
-            const biasFast = 0.5; // factor applied to the faster object (they push less)
-            const biasSlow = 0.8; // factor applied to the slower object (they get pushed more)
-            // scaleDown overall to reach ~70% reduction of recoil
-            const scaleDown = 0.3;
-            let pushA = a.type === "player" ? (aIsFaster ? biasFast : biasSlow) * overlap * knockA * knockScale * scaleDown : 0;
-            let pushB = b.type === "player" ? (aIsFaster ? biasSlow : biasFast) * overlap * knockB * knockScale * scaleDown : 0;
+        return { speedA, speedB, speedDiff, aIsFaster };
+    }
 
-        // If the object has a facing vector, detect whether it was hit from the front.
-        // If hit from front, reduce the push (player blocks a bit with the frontal rectangle).
-        const FRONT_THRESHOLD = 0.5; // dot product threshold to consider "front"
-        const FRONT_REDUCTION = 0.5; // reduce push to 50% when hit on front rectangle
+    calculateKnockback(a, b, speeds, overlap, nx, ny) {
+        const { speedA, speedB, speedDiff, aIsFaster } = speeds;
+        
+        const knockA = this.baseStrength * (1 + (a.collisions || 0) * this.growth);
+        const knockB = this.baseStrength * (1 + (b.collisions || 0) * this.growth);
+        
+        const speedScale = 1 + speedDiff * this.speedInfluence;
+    
+        const desktopModifier = Responsive.getKnockbackModifier();
+        
+        let pushA = a.type === "player" 
+            ? (aIsFaster ? this.fasterBias : this.slowerBias) * overlap * knockA * speedScale * this.recoilScale * desktopModifier
+            : 0;
+            
+        let pushB = b.type === "player"
+            ? (aIsFaster ? this.slowerBias : this.fasterBias) * overlap * knockB * speedScale * this.recoilScale * desktopModifier
+            : 0;
 
-        // For a: incoming vector toward a is (-nx, -ny)
-        if (a.type === "player" && a.facing) {
-            const inAx = -nx;
-            const inAy = -ny;
-            const magA = Math.hypot(inAx, inAy) || 1;
-            const dotA = (inAx / magA) * a.facing.x + (inAy / magA) * a.facing.y;
-            if (dotA > FRONT_THRESHOLD) {
-                pushA *= FRONT_REDUCTION;
-            }
+        const shieldMultiplier = this.detectShieldCollision(a, b, nx, ny);
+        pushA *= shieldMultiplier;
+        pushB *= shieldMultiplier;
+
+        pushA = this.applyRecoilBonus(a, pushA);
+        pushB = this.applyRecoilBonus(b, pushB);
+
+        return { pushA, pushB };
+    }
+
+    detectShieldCollision(a, b, nx, ny) {
+        if (a.type !== "player" || b.type !== "player") return 1.0;
+        if (!a.facing || !b.facing) return 1.0;
+
+        const aShieldFacing = this.isShieldFacingDirection(a, nx, ny);
+        const bShieldFacing = this.isShieldFacingDirection(b, -nx, -ny);
+
+        if (aShieldFacing && bShieldFacing) {
+            return this.shieldCollisionMultiplier;
         }
 
-        // For b: incoming vector toward b is (nx, ny)
-        if (b.type === "player" && b.facing) {
-            const inBx = nx;
-            const inBy = ny;
-            const magB = Math.hypot(inBx, inBy) || 1;
-            const dotB = (inBx / magB) * b.facing.x + (inBy / magB) * b.facing.y;
-            if (dotB > FRONT_THRESHOLD) {
-                pushB *= FRONT_REDUCTION;
-            }
-        }
+        return 1.0;
+    }
 
-        // 🧠 Debug Info
-        console.log(
-            `%c[Collision]`,
-            "color: orange; font-weight: bold;",
-            `SpeedA: ${speedA.toFixed(2)}, SpeedB: ${speedB.toFixed(2)}, Δspeed: ${speedDiff.toFixed(2)}`
-        );
-        console.log(
-            `%cObject A (${a.type})`,
-            "color: cyan;",
-            `Collisions: ${a.collisions}, Knockback: ${(pushA * 10).toFixed(2)}`
-        );
-        console.log(
-            `%cObject B (${b.type})`,
-            "color: magenta;",
-            `Collisions: ${b.collisions}, Knockback: ${(pushB * 10).toFixed(2)}`
-        );
+    isShieldFacingDirection(player, dirX, dirY) {
+        const dotProduct = player.facing.x * dirX + player.facing.y * dirY;
+        return dotProduct > this.frontThreshold;
+    }
 
-        // Separate and apply impulse only to players
-        if (a.type === "player") {
-            // positional separation (reduced)
-            a.x -= nx * pushA * 0.3;
-            a.y -= ny * pushA * 0.3;
-            // reduced impulse to velocity so recoil is about 70% less
-            a.vx = (a.vx || 0) - nx * pushA * 0.3;
-            a.vy = (a.vy || 0) - ny * pushA * 0.3;
-        }
-        if (b.type === "player") {
-            b.x += nx * pushB * 0.3;
-            b.y += ny * pushB * 0.3;
-            b.vx = (b.vx || 0) + nx * pushB * 0.3;
-            b.vy = (b.vy || 0) + ny * pushB * 0.3;
-        }
+    applyRecoilBonus(player, basePush) {
+        if (!player.accumulatedRecoil) return basePush;
+        
+        const recoilMultiplier = 1 + (player.accumulatedRecoil / 100);
+        
+        return basePush * recoilMultiplier;
+    }
 
-        // Notify listeners about recoil magnitudes (use the same scale as debug logs: *10)
+    applyKnockback(a, b, nx, ny, knockback) {
+        let { pushA, pushB } = knockback;
+
+        pushA = this.applyFrontReduction(a, -nx, -ny, pushA);
+        pushB = this.applyFrontReduction(b, nx, ny, pushB);
+
+        this.applyForces(a, -nx, -ny, pushA);
+        this.applyForces(b, nx, ny, pushB);
+    }
+
+    applyFrontReduction(obj, incomingX, incomingY, push) {
+        if (obj.type !== "player" || !obj.facing) return push;
+
+        const magnitude = Math.hypot(incomingX, incomingY) || 1;
+        const dotProduct = (incomingX / magnitude) * obj.facing.x + 
+                          (incomingY / magnitude) * obj.facing.y;
+
+        return dotProduct > this.frontThreshold ? push * this.frontReduction : push;
+    }
+
+    applyForces(obj, nx, ny, push) {
+        if (obj.type !== "player") return;
+
+        obj.x += nx * push * this.separationScale;
+        obj.y += ny * push * this.separationScale;
+        obj.vx = (obj.vx || 0) + nx * push * this.impulseScale;
+        obj.vy = (obj.vy || 0) + ny * push * this.impulseScale;
+    }
+
+    notifyRecoil(a, b, knockback) {
+        if (typeof this.onRecoil !== "function") return;
+
         try {
-            if (typeof this.onRecoil === "function") {
-                this.onRecoil({ aPush: pushA * 10, bPush: pushB * 10, a, b });
-            }
+            this.onRecoil({
+                aPush: (knockback.pushA * this.debugScale) / 1000,
+                bPush: (knockback.pushB * this.debugScale) / 1000,
+                a,
+                b
+            });
         } catch (e) {
-            console.warn("onRecoil callback threw:", e);
+            console.warn("onRecoil callback error:", e);
         }
     }
 
     update(objects) {
         for (const obj of objects) {
-            if (obj.type === "player" && "vx" in obj && "vy" in obj) {
-                obj.x += obj.vx;
-                obj.y += obj.vy;
+            this.updateObject(obj);
+        }
+    }
 
-                obj.vx *= this.friction;
-                obj.vy *= this.friction;
-            }
+    updateObject(obj) {
+        if (obj.type === "player" && "vx" in obj && "vy" in obj) {
+            obj.x += obj.vx;
+            obj.y += obj.vy;
+            obj.vx *= this.friction;
+            obj.vy *= this.friction;
+        }
 
-            if ("collisions" in obj) {
-                obj.collisions *= this.decay;
-            }
+        if ("collisions" in obj) {
+            obj.collisions *= this.decay;
         }
     }
 }

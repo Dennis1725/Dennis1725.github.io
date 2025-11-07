@@ -1,4 +1,6 @@
-// js/joystick.mjs
+/**
+ * Joystick module - creates and manages the joystick
+ */
 export class Joystick {
     constructor({ outerRadius = 60, innerRadius = 30, color = "rgba(0,0,0,0.3)" } = {}) {
         this.x = 0;
@@ -11,8 +13,8 @@ export class Joystick {
 
         this.touchId = null;
         this.active = false;
-        this.value = { x: 0, y: 0 }; // normalized direction vector (-1 to 1)
-        this.strength = 0; // magnitude (0 to 1)
+        this.value = { x: 0, y: 0 }; 
+        this.strength = 0; 
         this.ctx = null;
         this.canvas = null;
     }
@@ -41,13 +43,12 @@ export class Joystick {
         ctx.save();
         ctx.globalAlpha = 0.7;
 
-        // Outer circle
+      
         ctx.beginPath();
         ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
         ctx.fillStyle = this.color;
         ctx.fill();
 
-        // Inner circle position based on input
         const innerX = this.x + this.value.x * radius * this.strength;
         const innerY = this.y + this.value.y * radius * this.strength;
 
@@ -91,7 +92,7 @@ export class Joystick {
 
         this.value.x = dx / (dist || 1);
         this.value.y = dy / (dist || 1);
-        this.strength = norm; // store magnitude for speed scaling
+        this.strength = norm; 
 
         e.preventDefault();
     }

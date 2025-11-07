@@ -1,9 +1,20 @@
-/*
- * module: playfield
- * -->gnerates the playfield with the border and obstacles
+/**
+ * Playfield module - generates playfield with borders and obstacles
  */
 import { Obstacle } from "./obstacles.mjs";
 import Responsive from "./responsive.mjs";
+
+const OBSTACLE_MIN_SPACING = 10;
+const MAX_PLACEMENT_ATTEMPTS = 60;
+const BORDER_WIDTH = 4;
+const BORDER_COLOR = "#8B0000";
+const FALLBACK_BG_COLOR = "lightyellow";
+
+const TILE_COUNTS = {
+    small: 3,
+    medium: 4,
+    large: 6
+};
 
 export class Playfield {
     constructor(ctx, physics, game) {
@@ -12,25 +23,24 @@ export class Playfield {
         this.game = game;
         this.x = 0;
         this.y = 0;
+        
         const dimensions = Responsive.calculatePlayfieldDimensions();
         this.width = dimensions.width;
         this.height = dimensions.height;
+        
         this.obstacles = [];
         this.initialized = false;
-        
-        this.groundSprite = new Image();
-        this.groundSpriteLoaded = false;
-        this.groundSprite.src = "./sprites/Ground_sprite.png";
-        this.groundSprite.onload = () => {
-            this.groundSpriteLoaded = true;
-        };
+        this.loadGroundSprite();
     }
 
-    
+    loadGroundSprite() {
+        this.groundSprite = new Image();
+        this.groundSprite.src = "./sprites/Ground_sprite.png";
+    }
+
     set(x, y, w, h, ctx) {
-        
-        const horizontalBuffer = Math.max(12, w * 0.024); 
-        const verticalBuffer = Math.max(8, h * 0.016); 
+        const horizontalBuffer = Math.max(12, w * 0.024);
+        const verticalBuffer = Math.max(8, h * 0.016);
         
         this.x = x + horizontalBuffer;
         this.y = y + verticalBuffer;
@@ -38,169 +48,226 @@ export class Playfield {
         this.height = h - (verticalBuffer * 2);
         this.ctx = ctx;
 
-       // console.log("Playfield set:", this.x, this.y, this.width, this.height);
-
-        
         if (!this.initialized && w > 0 && h > 0) {
             this.generateObstacles();
             this.initialized = true;
         }
     }
-    
+
     generateObstacles() {
-        this.obstacles.length = 0;
+        this.obstacles = [];
+        
         const baseSize = Responsive.calculateObjectSize(40);
-        const pool = [
+        const sizePool = this.createSizePool(baseSize);
+        const shapes = ["circle", "triangle", "rect", "star", "route"];
+        const maxObstacles = Responsive.calculateObstacleCount();
+
+        let placedCount = 0;
+        while (placedCount < maxObstacles) {
+            const obstacle = this.tryPlaceObstacle(sizePool, shapes);
+            if (!obstacle) break;
+            
+            this.obstacles.push(obstacle);
+            this.physics.add(obstacle);
+            placedCount++;
+        }
+    }
+
+    createSizePool(baseSize) {
+        return [
             { r: baseSize },
             { r: baseSize * 1.5 },
             { r: baseSize * 0.75 },
             { r: baseSize * 1.25 },
             { r: baseSize * 1.1 }
         ];
+    }
 
-        const shapes = ["circle", "triangle", "rect", "star", "route"];
-        const maxObstacles = Responsive.calculateObstacleCount();
-        let placed = 0;
-        const maxAttemptsPerObstacle = 60;
+    tryPlaceObstacle(sizePool, shapes) {
+        for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS; attempt++) {
+            const size = sizePool[Math.floor(Math.random() * sizePool.length)];
+            const position = this.getRandomPosition(size.r);
+            const shape = shapes[Math.floor(Math.random() * shapes.length)];
 
-        const players = (this.game && this.game.players) ? this.game.players : [];
-
-        while (placed < maxObstacles) {
-            let attempts = 0;
-            let placedThis = false;
-
-            //while loop for generating obstacles not in the player or other obstacles
-            while (attempts < maxAttemptsPerObstacle && !placedThis) {
-                attempts++;
-                const pick = pool[Math.floor(Math.random() * pool.length)];
-                const ox = this.x + Math.random() * (this.width - 2 * pick.r) + pick.r;
-                const oy = this.y + Math.random() * (this.height - 2 * pick.r) + pick.r;
-                const shape = shapes[Math.floor(Math.random() * shapes.length)];
-
-                
-                let ok = true;
-                for (const p of players) {
-                    const dx = p.x - ox;
-                    const dy = p.y - oy;
-                    const dist = Math.hypot(dx, dy);
-                    if (dist < (p.radius + pick.r + 10)) { 
-                        ok = false;
-                        break;
-                    }
-                }
-                if (!ok) continue;
-
-                
-                for (const other of this.obstacles) {
-                    const dx = other.x - ox;
-                    const dy = other.y - oy;
-                    const dist = Math.hypot(dx, dy);
-                    if (dist < (other.radius + pick.r + 10)) { 
-                        ok = false;
-                        break;
-                    }
-                }
-                if (!ok) continue;
-
-                let obstacle;
-                if (shape === "rect") {
-                    obstacle = new Obstacle({ x: ox, y: oy, radius: pick.r, shape: "rect", width: pick.r * 2.2, height: pick.r * 1.2 });
-                } else if (shape === "route") {
-                    const pts = [
-                        { x: ox - pick.r, y: oy },
-                        { x: ox - pick.r / 2, y: oy - pick.r * 0.6 },
-                        { x: ox + pick.r / 2, y: oy + pick.r * 0.4 },
-                        { x: ox + pick.r, y: oy }
-                    ];
-                    obstacle = new Obstacle({ x: ox, y: oy, radius: pick.r, shape: "route", points: pts });
-                } else {
-                    obstacle = new Obstacle({ x: ox, y: oy, radius: pick.r, shape: shape });
-                }
-
-                this.obstacles.push(obstacle);
-                this.physics.add(obstacle);
-                placed++;
-                placedThis = true;
+            if (this.isValidPosition(position, size.r)) {
+                return this.createObstacle(position, size.r, shape);
             }
+        }
+        return null;
+    }
 
-            if (!placedThis) break;
+    getRandomPosition(radius) {
+        return {
+            x: this.x + Math.random() * (this.width - 2 * radius) + radius,
+            y: this.y + Math.random() * (this.height - 2 * radius) + radius
+        };
+    }
+
+    isValidPosition(position, radius) {
+        return this.isFarFromPlayers(position, radius) && 
+               this.isFarFromObstacles(position, radius);
+    }
+
+    isFarFromPlayers(position, radius) {
+        const players = this.game?.players || [];
+        
+        return players.every(player => {
+            const distance = Math.hypot(player.x - position.x, player.y - position.y);
+            return distance >= player.radius + radius + OBSTACLE_MIN_SPACING;
+        });
+    }
+
+    isFarFromObstacles(position, radius) {
+        return this.obstacles.every(obstacle => {
+            const distance = Math.hypot(obstacle.x - position.x, obstacle.y - position.y);
+            return distance >= obstacle.radius + radius + OBSTACLE_MIN_SPACING;
+        });
+    }
+
+    createObstacle(position, radius, shape) {
+        const config = {
+            x: position.x,
+            y: position.y,
+            radius,
+            shape
+        };
+
+        if (shape === "rect") {
+            config.width = radius * 2.2;
+            config.height = radius * 1.2;
+        } else if (shape === "route") {
+            config.points = this.createRoutePoints(position, radius);
         }
 
-        //console.log("Obstacles generated:", this.obstacles.length);
+        return new Obstacle(config);
     }
-    
+
+    createRoutePoints(position, radius) {
+        return [
+            { x: position.x - radius, y: position.y },
+            { x: position.x - radius / 2, y: position.y - radius * 0.6 },
+            { x: position.x + radius / 2, y: position.y + radius * 0.4 },
+            { x: position.x + radius, y: position.y }
+        ];
+    }
+
     update(players) {
         this.checkBorders(players);
     }
 
     checkBorders(players) {
-        for (const p of players) {
-            if (
-                p.x - p.radius < this.x ||
-                p.x + p.radius > this.x + this.width ||
-                p.y - p.radius < this.y ||
-                p.y + p.radius > this.y + this.height
-            ) {
-                this.game.state = "gameover";
-                this.game.winner = players.find(pl => pl !== p);
-                //console.log(`${this.game.winner.color.toUpperCase()} Player Wins (Border)`);
+        for (const player of players) {
+            if (this.isPlayerOutOfBounds(player)) {
+                this.handlePlayerOutOfBounds(player, players);
             }
         }
     }
 
+    isPlayerOutOfBounds(player) {
+        return player.x - player.radius < this.x ||
+               player.x + player.radius > this.x + this.width ||
+               player.y - player.radius < this.y ||
+               player.y + player.radius > this.y + this.height;
+    }
+
+    handlePlayerOutOfBounds(player, players) {
+        this.game.state = "gameover";
+        this.game.winner = players.find(p => p !== player);
+    }
+
     draw() {
-        const ctx = this.ctx;
-        if (!ctx) return;
+        if (!this.ctx) return;
 
-        ctx.save();
-        
-        
-        if (this.groundSpriteLoaded && this.groundSprite.complete) {
-            const sw = window.innerWidth;
-            const sh = window.innerHeight;
-            const smallDim = Math.min(sw, sh);
-            let totalTiles;
-            if (smallDim < 800) totalTiles = 3;            
-            else if (smallDim < 1200) totalTiles = 4;    
-            else totalTiles = 6;                          
+        this.ctx.save();
+        this.drawBackground();
+        this.drawBorder();
+        this.ctx.restore();
 
-            //sprite calculation for background of the playfield
-            const ar = this.width / this.height;
-            let tilesX = 3, tilesY = 1; 
-            if (totalTiles === 3) {
-                if (ar >= 1) { tilesX = 3; tilesY = 1; } else { tilesX = 1; tilesY = 3; }
-            } else if (totalTiles === 4) {
-                if (ar > 1.4) { tilesX = 4; tilesY = 1; }
-                else if (ar < 0.7) { tilesX = 1; tilesY = 4; }
-                else { tilesX = 2; tilesY = 2; }
-            } else { 
-                if (ar >= 1) { tilesX = 3; tilesY = 2; } else { tilesX = 2; tilesY = 3; }
-            }
+        this.drawObstacles();
+    }
 
-            const tileW = this.width / tilesX;
-            const tileH = this.height / tilesY;
-
-            for (let iy = 0; iy < tilesY; iy++) {
-                for (let ix = 0; ix < tilesX; ix++) {
-                    const dx = this.x + ix * tileW;
-                    const dy = this.y + iy * tileH;
-                    ctx.drawImage(this.groundSprite, dx, dy, tileW, tileH);
-                }
-            }
+    drawBackground() {
+        if (this.isGroundSpriteLoaded()) {
+            this.drawTiledBackground();
         } else {
-            ctx.fillStyle = "lightyellow";
-            ctx.fillRect(this.x, this.y, this.width, this.height);
+            this.drawFallbackBackground();
         }
+    }
 
-        //draw border and obstacles
-        ctx.strokeStyle = "red";
-        ctx.lineWidth = 4;
-        ctx.strokeRect(this.x, this.y, this.width, this.height);
-        ctx.restore();
+    isGroundSpriteLoaded() {
+        return this.groundSprite && this.groundSprite.complete;
+    }
 
-       
-        for (const obs of this.obstacles) {
-            obs.draw(ctx);
+    drawTiledBackground() {
+        const { tilesX, tilesY } = this.calculateTileLayout();
+        const tileWidth = this.width / tilesX;
+        const tileHeight = this.height / tilesY;
+
+        for (let iy = 0; iy < tilesY; iy++) {
+            for (let ix = 0; ix < tilesX; ix++) {
+                const dx = this.x + ix * tileWidth;
+                const dy = this.y + iy * tileHeight;
+                this.ctx.drawImage(this.groundSprite, dx, dy, tileWidth, tileHeight);
+            }
+        }
+    }
+
+    calculateTileLayout() {
+        const screenSize = Math.min(window.innerWidth, window.innerHeight);
+        const totalTiles = this.getTotalTileCount(screenSize);
+        const aspectRatio = this.width / this.height;
+
+        return this.getTileGrid(totalTiles, aspectRatio);
+    }
+
+    getTotalTileCount(screenSize) {
+        if (screenSize < 800) return TILE_COUNTS.small;
+        if (screenSize < 1200) return TILE_COUNTS.medium;
+        return TILE_COUNTS.large;
+    }
+
+    getTileGrid(totalTiles, aspectRatio) {
+        const gridLayouts = {
+            [TILE_COUNTS.small]: this.getSmallGrid(aspectRatio),
+            [TILE_COUNTS.medium]: this.getMediumGrid(aspectRatio),
+            [TILE_COUNTS.large]: this.getLargeGrid(aspectRatio)
+        };
+
+        return gridLayouts[totalTiles] || { tilesX: 3, tilesY: 1 };
+    }
+
+    getSmallGrid(aspectRatio) {
+        return aspectRatio >= 1 
+            ? { tilesX: 3, tilesY: 1 }
+            : { tilesX: 1, tilesY: 3 };
+    }
+
+    getMediumGrid(aspectRatio) {
+        if (aspectRatio > 1.4) return { tilesX: 4, tilesY: 1 };
+        if (aspectRatio < 0.7) return { tilesX: 1, tilesY: 4 };
+        return { tilesX: 2, tilesY: 2 };
+    }
+
+    getLargeGrid(aspectRatio) {
+        return aspectRatio >= 1
+            ? { tilesX: 3, tilesY: 2 }
+            : { tilesX: 2, tilesY: 3 };
+    }
+
+    drawFallbackBackground() {
+        this.ctx.fillStyle = FALLBACK_BG_COLOR;
+        this.ctx.fillRect(this.x, this.y, this.width, this.height);
+    }
+
+    drawBorder() {
+        this.ctx.strokeStyle = BORDER_COLOR;
+        this.ctx.lineWidth = BORDER_WIDTH;
+        this.ctx.strokeRect(this.x, this.y, this.width, this.height);
+    }
+
+    drawObstacles() {
+        for (const obstacle of this.obstacles) {
+            obstacle.draw(this.ctx);
         }
     }
 }

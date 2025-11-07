@@ -1,7 +1,11 @@
-/*
- * module: player
- * -->creates the player 
- */ 
+/**
+ * Player module - creates and manages player
+ */
+const SPRITE_PATHS = {
+    blue: "./sprites/Blue_player_sprite.png",
+    green: "./sprites/Green_player_sprite.png"
+};
+
 export class Player {
     constructor({ radius = 20, color = "red", speed = 0.63 } = {}) {
         this.x = 0;
@@ -17,25 +21,20 @@ export class Player {
         this.joystick = null;
         this.facing = { x: 1, y: 0 };
         
-        this.sprite = new Image();
-        this.shieldSprite = new Image();
-        this.spriteLoaded = false;
-        this.shieldLoaded = false;
+        this.loadSprites();
+    }
+
+    loadSprites() {
+        this.sprite = this.loadImage(SPRITE_PATHS[this.color]);
+        this.shieldSprite = this.loadImage("./sprites/Shield.png");
+    }
+
+    loadImage(src) {
+        if (!src) return null;
         
-        if (color === "blue") {
-            this.sprite.src = "./sprites/Blue_player_sprite.png";
-        } else if (color === "green") {
-            this.sprite.src = "./sprites/Green_player_sprite.png";
-        }
-        
-        this.sprite.onload = () => {
-            this.spriteLoaded = true;
-        };
-        
-        this.shieldSprite.src = "./sprites/Shield.png";
-        this.shieldSprite.onload = () => {
-            this.shieldLoaded = true;
-        };
+        const img = new Image();
+        img.src = src;
+        return img;
     }
 
     set(x, y, width, height, ctx) {
@@ -50,83 +49,93 @@ export class Player {
         this.joystick = joystick;
     }
 
-    // Update position based on joystick input
     update() {
         if (!this.joystick) return;
+        
+        this.updatePosition();
+        this.updateFacing();
+        this.constrainToCanvas();
+    }
+
+    updatePosition() {
         this.x += this.joystick.value.x * this.speed;
         this.y += this.joystick.value.y * this.speed;
-
-        const vx = this.joystick.value.x;
-        const vy = this.joystick.value.y;
-        const mag = Math.hypot(vx, vy);
-        if (mag > 0.1) {
-            this.facing.x = vx / (mag || 1);
-            this.facing.y = vy / (mag || 1);
-        }
-
-        if (this.ctx && this.ctx.canvas) {
-            const cw = this.ctx.canvas.width;
-            const ch = this.ctx.canvas.height;
-            this.x = Math.max(this.radius, Math.min(cw - this.radius, this.x));
-            this.y = Math.max(this.radius, Math.min(ch - this.radius, this.y));
-        }
     }
 
-draw(ctx = null) {
-    const drawCtx = ctx || this.ctx;
-    if (!drawCtx) return;
-
-    this.update();
-
-    drawCtx.save();
-    
-    if (this.spriteLoaded && this.sprite.complete) {
-        const spriteSize = this.radius * 2;
-        drawCtx.drawImage(
-            this.sprite,
-            this.x - this.radius,
-            this.y - this.radius,
-            spriteSize,
-            spriteSize
-        );
-    } else {
+    updateFacing() {
+        const { x: vx, y: vy } = this.joystick.value;
+        const magnitude = Math.hypot(vx, vy);
         
-        drawCtx.fillStyle = this.color;
-        drawCtx.beginPath();
-        drawCtx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        drawCtx.fill();
+        if (magnitude > 0.1) {
+            this.facing.x = vx / magnitude;
+            this.facing.y = vy / magnitude;
+        }
     }
-    
-    drawCtx.restore();
 
-    if (drawCtx) {
-        drawCtx.save();
-        const angle = Math.atan2(this.facing.y, this.facing.x);
-        drawCtx.translate(this.x, this.y);
-        drawCtx.rotate(angle);
+    constrainToCanvas() {
+        if (!this.ctx?.canvas) return;
+        
+        const { width, height } = this.ctx.canvas;
+        this.x = Math.max(this.radius, Math.min(width - this.radius, this.x));
+        this.y = Math.max(this.radius, Math.min(height - this.radius, this.y));
+    }
 
-        const shieldLength = this.radius * 1.2;
-        const shieldWidth = Math.max(6, this.radius * 1.6);
-        const shieldX = this.radius * 0.2;
+    draw(ctx = this.ctx) {
+        if (!ctx) return;
 
-        if (this.shieldLoaded && this.shieldSprite.complete) {
-            drawCtx.drawImage(
-                this.shieldSprite,
-                shieldX,
-                -shieldWidth / 2,
-                shieldLength,
-                shieldWidth
-            );
+        this.update();
+        this.drawPlayer(ctx);
+        this.drawShield(ctx);
+    }
+
+    drawPlayer(ctx) {
+        ctx.save();
+        
+        if (this.isImageLoaded(this.sprite)) {
+            const size = this.radius * 2;
+            ctx.drawImage(this.sprite, this.x - this.radius, this.y - this.radius, size, size);
         } else {
-            drawCtx.fillStyle = "rgba(211,211,211,0.9)";
-            drawCtx.beginPath();
-            drawCtx.rect(shieldX, -shieldWidth / 2, shieldLength, shieldWidth);
-            drawCtx.fill();
+            this.drawCircle(ctx);
         }
         
-        drawCtx.restore();
+        ctx.restore();
+    }
+
+    drawCircle(ctx) {
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    drawShield(ctx) {
+        ctx.save();
+        
+        const angle = Math.atan2(this.facing.y, this.facing.x);
+        ctx.translate(this.x, this.y);
+        ctx.rotate(angle);
+
+        const length = this.radius * 1.2;
+        const width = Math.max(6, this.radius * 1.6);
+        const offsetX = this.radius * 0.2;
+
+        if (this.isImageLoaded(this.shieldSprite)) {
+            ctx.drawImage(this.shieldSprite, offsetX, -width / 2, length, width);
+        } else {
+            this.drawShieldRect(ctx, offsetX, width, length);
+        }
+        
+        ctx.restore();
+    }
+
+    drawShieldRect(ctx, offsetX, width, length) {
+        ctx.fillStyle = "rgba(211,211,211,0.9)";
+        ctx.beginPath();
+        ctx.rect(offsetX, -width / 2, length, width);
+        ctx.fill();
+    }
+
+    isImageLoaded(img) {
+        return img && img.complete;
     }
 }
-
-}
-
