@@ -11,8 +11,15 @@ const Responsive = {
         return width >= 1440;
     },
 
+    isMobile() {
+        const { width } = this.getScreenDimensions();
+        return width < 768;
+    },
+
     getKnockbackModifier() {
-        return this.isDesktop() ? 0.8 : 1.0; // 20% reduction on desktop
+        if (this.isDesktop()) return 0.8; // 20% reduction on desktop
+        if (this.isMobile()) return 1.2; // 20% increase on mobile
+        return 1.0; // tablet remains at base level
     },
 
     calculatePlayerSpeed() {
