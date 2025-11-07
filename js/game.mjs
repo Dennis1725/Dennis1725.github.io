@@ -12,8 +12,8 @@ import { Screen } from "./screen.mjs";
 import Responsive from "./responsive.mjs";
 
 const RECOIL_DISPLAY_OFFSET = {
-    top: 15,
-    bottom: 25
+    top: 40,
+    bottom: 50
 };
 
 const LAYOUT_WEIGHTS = {

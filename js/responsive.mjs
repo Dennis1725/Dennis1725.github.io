@@ -18,7 +18,7 @@ const Responsive = {
 
     getKnockbackModifier() {
         if (this.isDesktop()) return 0.8; // 20% reduction on desktop
-        if (this.isMobile()) return 1.2; // 20% increase on mobile
+        if (this.isMobile()) return 1.44; // 44% increase on mobile (1.2 * 1.2)
         return 1.0; // tablet remains at base level
     },
 
