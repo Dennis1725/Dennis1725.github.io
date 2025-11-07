@@ -137,7 +137,6 @@ export class Game {
     update() {
         if (this.state !== "playing") return;
 
-        // Sync accumulated recoil to players before physics calculations
         this.syncRecoilToPlayers();
 
         this.players.forEach(player => player.update());
@@ -186,9 +185,8 @@ export class Game {
         const playfieldLeft = this.playfield.x;
         const playfieldRight = this.playfield.x + this.playfield.width;
         
-        // Player 1 (blue, top): boost button on left side
+        
         const xPositionPlayer1 = playfieldLeft + this.canvas.width * 0.15;
-        // Player 2 (green, bottom): boost button on right side
         const xPositionPlayer2 = playfieldRight - this.canvas.width * 0.15;
         
         ctx.save();
@@ -196,7 +194,7 @@ export class Game {
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         
-        // Player 1 label (top, blue) - over boost button (left side)
+    
         const player1Y = playfieldTop - 15;
         ctx.fillStyle = this.players[0].color;
         ctx.translate(xPositionPlayer1, player1Y);
@@ -205,7 +203,7 @@ export class Game {
         ctx.rotate(-Math.PI);
         ctx.translate(-xPositionPlayer1, -player1Y);
         
-        // Player 2 label (bottom, green) - over boost button (right side)
+    
         const player2Y = playfieldBottom + 15;
         ctx.fillStyle = this.players[1].color;
         ctx.fillText(`${this.players[1].color.toUpperCase()} PLAYER`, xPositionPlayer2, player2Y);
@@ -219,9 +217,7 @@ export class Game {
         const playfieldLeft = this.playfield.x;
         const playfieldRight = this.playfield.x + this.playfield.width;
         
-        // Player 1 (blue, top): boost button on left side
         const xPositionPlayer1 = playfieldLeft + this.canvas.width * 0.15;
-        // Player 2 (green, bottom): boost button on right side
         const xPositionPlayer2 = playfieldRight - this.canvas.width * 0.15;
         
         this.drawRecoilText(
